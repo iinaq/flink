@@ -12,7 +12,6 @@ import org.apache.flink.api.java.typeutils.TypeExtractor;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.TimeCharacteristic;
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.timestamps.AscendingTimestampExtractor;
@@ -22,7 +21,6 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
 
 import java.io.File;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -30,10 +28,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * @ClassName HotItems
- * @Description TODO
- * @Author zhouzhongshan
- * @Date 2019/6/28  15:23
+ * TopN 计算最热门商品
  **/
 public class HotItems {
 
@@ -56,32 +51,30 @@ public class HotItems {
         // 创建 PojoCsvInputFormat
         PojoCsvInputFormat<UserBehavior> csvInput = new PojoCsvInputFormat<>(filePath, pojoType, fieldOrder);
 
-
-        env
-                // 创建数据源，得到 UserBehavior 类型的 DataStream
-                .createInput(csvInput, pojoType)
-                // 抽取出时间和生成 watermark
-                .assignTimestampsAndWatermarks(new AscendingTimestampExtractor<UserBehavior>() {
-                    @Override
-                    public long extractAscendingTimestamp(UserBehavior userBehavior) {
-                        // 原始数据单位秒，将其转成毫秒
-                        return userBehavior.timestamp * 1000;
-                    }
-                })
+        // 创建数据源，得到 UserBehavior 类型的 DataStream
+        env.createInput(csvInput, pojoType)
+        // 抽取出时间和生成 watermark
+        .assignTimestampsAndWatermarks(new AscendingTimestampExtractor<UserBehavior>() {
+            @Override
+            public long extractAscendingTimestamp(UserBehavior userBehavior) {
+                // 原始数据单位秒，将其转成毫秒
+                return userBehavior.timestamp * 1000;
+            }
+        })
+        // 过滤出只有点击的数据
+        .filter(new FilterFunction<UserBehavior>() {
+            @Override
+            public boolean filter(UserBehavior userBehavior) throws Exception {
                 // 过滤出只有点击的数据
-                .filter(new FilterFunction<UserBehavior>() {
-                    @Override
-                    public boolean filter(UserBehavior userBehavior) throws Exception {
-                        // 过滤出只有点击的数据
-                        return userBehavior.behavior.equals("pv");
-                    }
-                })
-                .keyBy("itemId")
-                .timeWindow(Time.minutes(60), Time.minutes(5))
-                .aggregate(new CountAgg(), new WindowResultFunction())
-                .keyBy("windowEnd")
-                .process(new TopNHotItems(3))
-                .print();
+                return userBehavior.behavior.equals("pv");
+            }
+        })
+        .keyBy("itemId")
+        .timeWindow(Time.minutes(60), Time.minutes(5))
+        .aggregate(new CountAgg(), new WindowResultFunction())
+        .keyBy("windowEnd")
+        .process(new TopNHotItems(3))
+        .print();
 
         env.execute("Hot Items Job");
     }
